@@ -103,8 +103,8 @@ EOF
         run: |
           set -euo pipefail
           mkdir -p build/iso/boot build/iso/isolinux
-          # create squashfs named exactly as virt initramfs expects
-          sudo mksquashfs build/mod build/iso/boot/modloop-virt -comp xz -noappend
+          # Fixed block size tracking so squashfs works natively on Alpine kernel mounts
+          sudo mksquashfs build/mod build/iso/boot/modloop-virt -b 256K -comp xz -noappend
           # copy isolinux/syslinux files into isolinux/
           if [ -f /usr/lib/ISOLINUX/isolinux.bin ]; then
             sudo cp /usr/lib/ISOLINUX/isolinux.bin build/iso/isolinux/ || true
@@ -201,4 +201,5 @@ EOF
         uses: actions/upload-artifact@v4
         with:
           name: cherryOS-1.0-Algiers-iso
-          path: ${{ env.ISO_NAME }}
+          path: cherryOS-1.0-Algiers.iso
+
