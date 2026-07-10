@@ -2,7 +2,7 @@ name: Build cherryOS 1.0 Algiers
 on: [workflow_dispatch]
 
 env:
-  ALPINE_ISO_URL: "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-virt-3.20.0-x86_64.iso"
+  ALPINE_ISO_URL: "https://alpinelinux.org"
   ALPINE_ISO_SHA256: "0b2fa4e82e79a4e4b640e11bb0c49f72753e6640924093d10a5d9255c9a0a2e1"
   ISO_NAME: "cherryOS-1.0-Algiers.iso"
   EFIBOOT_SIZE_MB: "64"
@@ -70,8 +70,8 @@ ID=cherryos
 ID_LIKE=alpine
 PRETTY_NAME="cherryOS 1.0 Algiers"
 EOF
-          # Icon (optional) — consider adding to repo for guaranteed availability
-          SAFARI_PNG_URL="https://upload.wikimedia.org/wikipedia/en/3/3b/Safari_14_Logo.png"
+          # Icon configuration using clean modern vector links
+          SAFARI_PNG_URL="https://wikimedia.org"
           if ! wget -q -O build/mod/usr/share/icons/safari.png "$SAFARI_PNG_URL"; then
             echo "Warning: could not download safari icon, continuing without it"
           fi
@@ -202,4 +202,3 @@ EOF
         with:
           name: cherryOS-1.0-Algiers-iso
           path: cherryOS-1.0-Algiers.iso
-
