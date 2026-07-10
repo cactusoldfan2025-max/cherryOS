@@ -11,16 +11,17 @@ jobs:
     - name: Install System Architecture Compiler Utilities
       run: |
         sudo apt-get update
-        sudo apt-get install -y debootstrap squashfs-tools genisoimage isolinux syslinux git wget
+        sudo apt-get install -y debootstrap debian-archive-keyring squashfs-tools genisoimage isolinux syslinux git wget
 
     - name: Bootstrap Modern Core Linux Filesystem
       run: |
         mkdir -p build/livecd/casper build/chroot
-        # Pull down pure, lightning-fast Debian 13 Trixie Stable Base
-        sudo debootstrap --arch=amd64 trixie build/chroot http://debian.org
         
-        # Inject up-to-date modern repository sources
-        echo "deb http://debian.org trixie main contrib non-free non-free-firmware" | sudo tee build/chroot/etc/apt/sources.list
+        # Pull down pure, modern Debian Testing (Trixie) by forcing the testing target
+        sudo debootstrap --arch=amd64 testing build/chroot http://debian.org
+        
+        # Inject up-to-date repository sources into the build
+        echo "deb http://debian.org testing main contrib non-free non-free-firmware" | sudo tee build/chroot/etc/apt/sources.list
 
     - name: Install Core Desktop System Packages Non-Interactively
       run: |
@@ -96,4 +97,3 @@ jobs:
       with:
         name: cherryOS-1.0-Algiers-iso
         path: build/cherryOS-1.0-Algiers.iso
-
