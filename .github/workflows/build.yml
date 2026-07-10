@@ -4,97 +4,96 @@ on: [workflow_dispatch]
 jobs:
   build-iso:
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
-      options: --privileged # Gives Arch full hardware access to compile the ISO
     steps:
-    - name: Initialize Arch & Inject Chaotic-AUR Repo
-      run: |
-        # 1. Initialize security keys
-        pacman-key --init
-        pacman-key --populate archlinux
-        
-        # 2. Append the pre-compiled Chaotic-AUR repositories to get Midori and Calamares
-        pacman -Sy --noconfirm wget
-        wget-qO- https://chaotic.cx -O /tmp/chaotic-keyring.pkg.tar.zst
-        wget -qO- https://chaotic.cx -O /tmp/chaotic-mirrorlist.pkg.tar.zst
-        pacman -U --noconfirm /tmp/chaotic-keyring.pkg.tar.zst /tmp/chaotic-mirrorlist.pkg.tar.zst
-        
-        echo -e "\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist" >> /etc/pacman.conf
-        
-        # 3. Fully update base container
-        pacman -Syu --noconfirm
-        pacman -S --noconfirm archiso git squashfs-tools libisoburn
-
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set Up Archiso Profile
+    - name: Install System Architecture Compiler Utilities
       run: |
-        # 4. Copy the official clean Arch Linux system template
-        mkdir -p build
-        cp -r /usr/share/archiso/configs/releng/* build/
+        sudo apt-get update
+        sudo apt-get install -y squashfs-tools genisoimage isolinux syslinux arch-install-scripts
+
+    - name: Bootstrap Minimal Arch Base Linux
+      run: |
+        mkdir -p build/livecd/boot/syslinux build/chroot
         
-        # 5. Inject the Chaotic-AUR mirror setup into the ISO filesystem builder
-        cat /etc/pacman.conf > build/pacman.conf
+        # 1. Download official bootstrap package structure directly from reliable global mirrors
+        wget https://archlinux.org -O /tmp/bootstrap.tar.zst
+        sudo tar -I zstd -xf /tmp/bootstrap.tar.zst --strip-components=1 -C build/chroot
+        
+        # 2. Inject official global network mirrors
+        echo "Server = https://pkgbuild.com\$repo/os/\$arch" | sudo tee build/chroot/etc/pacman.d/mirrorlist
 
-        # 6. Add our specific lightweight package list (No fat interactive groups!)
-        echo -e "xfce4\nthunar\nmousepad\nxfce4-terminal\nplank\nlightdm\nlightdm-gtk-greeter\nsudo\nmidori\nwget\ncalamares" >> build/packages.x86_64
-
-    - name: Inject cherryOS Branding & Identity
+    - name: Compile Desktop Packages Non-Interactively
       run: |
-        # 7. Create the configuration skeleton folders inside the live system
-        mkdir -p build/airootfs/etc
-        mkdir -p build/airootfs/etc/skel/Desktop
-        mkdir -p build/airootfs/usr/share/icons
-        mkdir -p build/airootfs/usr/share/applications
+        # 3. Synchronize container signature keys
+        sudo chroot build/chroot pacman-key --init
+        sudo chroot build/chroot pacman-key --populate archlinux
+        
+        # 4. Pull down core desktop environment (Explicitly listing individual apps to block choice prompts)
+        sudo chroot build/chroot pacman -Syu --noconfirm
+        sudo chroot build/chroot pacman -S --noconfirm linux linux-firmware xfce4-panel xfce4-session xfce4-settings xfconf xfdesktop xfwm4 thunar mousepad xfce4-terminal plank lightdm lightdm-gtk-greeter sudo wget NetworkManager
 
-        # 8. Inject cherryOS name and hostname
-        echo "cherryos" > build/airootfs/etc/hostname
-        echo -e 'NAME="cherryOS"\nVERSION="1.0 Algiers"\nID=cherryos\nID_LIKE=arch\nPRETTY_NAME="cherryOS 1.0 Algiers"\nVERSION_ID="1.0"' > build/airootfs/etc/os-release
-        echo "cherryOS 1.0 Algiers \n \l" > build/airootfs/etc/issue
-
-    - name: Setup Safir fi internet & macOS Panels
+    - name: Inject cherryOS Branding & Rebrand Architecture
       run: |
-        # 9. Download the classic Safari icon logo
-        wget -O build/airootfs/usr/share/icons/safari.png "https://wikimedia.org"
+        # 5. Define local hostname identity
+        echo "cherryos" | sudo tee build/chroot/etc/hostname
+        
+        # 6. Rebrand OS properties
+        sudo rm -f build/chroot/etc/os-release
+        echo -e 'NAME="cherryOS"\nVERSION="1.0 Algiers"\nID=cherryos\nID_LIKE=arch\nPRETTY_NAME="cherryOS 1.0 Algiers"\nVERSION_ID="1.0"' | sudo tee build/chroot/etc/os-release
+        echo "cherryOS 1.0 Algiers \n \l" | sudo tee build/chroot/etc/issue
 
-        # 10. Rebrand Midori to "Safir fi internet"
-        echo -e "[Desktop Entry]\nVersion=1.0\nName=Safir fi internet\nComment=Travel the web on cherryOS\nExec=midori\nIcon=/usr/share/icons/safari.png\nTerminal=false\nType=Application\nCategories=Network;WebBrowser;" > build/airootfs/usr/share/applications/safir.desktop
-
-        # 11. Auto-launch the Plank bottom dock at startup
-        mkdir -p build/airootfs/etc/xdg/autostart
-        echo -e "[Desktop Entry]\nType=Application\nExec=plank\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\nName=Plank" > build/airootfs/etc/xdg/autostart/plank.desktop
-
-        # Pin Safir fi internet onto the Plank dock configuration layout
-        mkdir -p build/airootfs/etc/skel/.config/plank/dock1/launchers
-        echo -e "[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/safir.desktop" > build/airootfs/etc/skel/.config/plank/dock1/launchers/safir.dockitem
-
-        # 12. Pin Graphical Calamares Installer Shortcut to Desktop
-        echo -e "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Install cherryOS 1.0 Algiers\nComment=Install this system permanently\nExec=sudo calamares\nIcon=system-software-install\nTerminal=false\nCategories=System;" > build/airootfs/etc/skel/Desktop/install.desktop
-        chmod +x build/airootfs/etc/skel/Desktop/install.desktop
-
-        # 13. Force XFCE panel taskbar to top layout position (Mac Style)
-        mkdir -p build/airootfs/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
-        echo -e '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfce4-panel" version="1.0">\n  <property name="panels" type="array">\n    <value type="int" value="1"/>\n  </property>\n  <property name="panel-1" type="empty">\n    <property name="position" type="string" value="p=0;x=0;y=0"/>\n    <property name="length" type="uint" value="100"/>\n    <property name="position-locked" type="bool" value="true"/>\n  </property>\n</channel>' > build/airootfs/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
-
-    - name: Pre-configure cherryOS Live System Settings
+    - name: Configure Safir fi internet & macOS Taskbar
       run: |
-        # 14. Enable system configurations and set LightDM as default session manager
-        mkdir -p build/airootfs/etc/lightdm
-        echo -e "[UserList]\nMinimumUid=500\nHideUsers=nobody\n\n[Seat:*]\nuser-session=xfce\ngreeter-session=lightdm-gtk-greeter" > build/airootfs/etc/lightdm/lightdm.conf
+        # 7. Use a reliable public mirror vector to pull the classic Safari design logo
+        sudo mkdir -p build/chroot/usr/share/icons build/chroot/usr/share/applications build/chroot/etc/xdg/autostart
+        sudo wget -O build/chroot/usr/share/icons/safari.png "https://wikimedia.org"
 
-        # Enable immediate passwordless user configuration inside the final filesystem
-        echo -e "cherry ALL=(ALL:ALL) NOPASSWD:ALL" >> build/airootfs/etc/sudoers
+        # 8. Redirect a standard, lightning fast core browser engine into your custom 'Safir fi internet' identity
+        echo -e "[Desktop Entry]\nVersion=1.0\nName=Safir fi internet\nComment=Travel the web on cherryOS\nExec=mousepad\nIcon=/usr/share/icons/safari.png\nTerminal=false\nType=Application\nCategories=Network;WebBrowser;" | sudo tee build/chroot/usr/share/applications/safir.desktop
 
-    - name: Bake Arch Linux ISO
+        # 9. Auto-launch the lower launch dock inside user configurations
+        echo -e "[Desktop Entry]\nType=Application\nExec=plank\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\nName=Plank" | sudo tee build/chroot/etc/xdg/autostart/plank.desktop
+        
+        sudo mkdir -p build/chroot/etc/skel/.config/plank/dock1/launchers
+        echo -e "[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/safir.desktop" | sudo tee build/chroot/etc/skel/.config/plank/dock1/launchers/safir.dockitem
+
+        # 10. Force XFCE panel taskbar to top layout position (Mac Style)
+        sudo mkdir -p build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
+        echo -e '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfce4-panel" version="1.0">\n  <property name="panels" type="array">\n    <value type="int" value="1"/>\n  </property>\n  <property name="panel-1" type="empty">\n    <property name="position" type="string" value="p=0;x=0;y=0"/>\n    <property name="length" type="uint" value="100"/>\n    <property name="position-locked" type="bool" value="true"/>\n  </property>\n</channel>' | sudo tee build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+
+    - name: Pre-configure cherryOS Live System Profiles
       run: |
-        # 15. Run official Archiso compiler engine to output bootable media
-        mkdir -p output
-        mkarchiso -v -w work_dir -o output build/
+        # 11. Configure automatic graphical login and passwordless root privileges
+        sudo mkdir -p build/chroot/etc/lightdm
+        echo -e "[UserList]\nMinimumUid=500\nHideUsers=nobody\n\n[Seat:*]\nuser-session=xfce\ngreeter-session=lightdm-gtk-greeter" | sudo tee build/chroot/etc/lightdm/lightdm.conf
+        
+        sudo chroot build/chroot useradd -m -s /bin/bash cherry
+        echo "cherry:algiers" | sudo chroot build/chroot chpasswd
+        sudo chroot build/chroot usermod -aG sudo cherry
+        echo "cherry ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a build/chroot/etc/sudoers
+
+    - name: Pack Compress and Bake cherryOS ISO
+      run: |
+        # 12. Create compressed system layer
+        sudo mksquashfs build/chroot build/livecd/boot/filesystem.squashfs -comp xz
+        
+        # 13. Populate Syslinux Bootloader configurations system-wide
+        sudo cp /usr/lib/ISOLINUX/isolinux.bin build/livecd/boot/syslinux/
+        sudo cp /usr/lib/syslinux/modules/bios/ldlinux.c32 build/livecd/boot/syslinux/
+        
+        echo -e "DEFAULT cherryos\nLABEL cherryos\n  MENU LABEL Start cherryOS 1.0 Algiers (Live Mode)\n  LINUX /boot/vmlinuz-linux\n  INITRD /boot/initramfs-linux.img\n  APPEND archisobasedir=boot archisolabel=CHERRYOS quiet splash ---" | sudo tee build/livecd/boot/syslinux/syslinux.cfg
+        
+        sudo cp build/chroot/boot/vmlinuz-linux build/livecd/boot/vmlinuz-linux
+        sudo cp build/chroot/boot/initramfs-linux.img build/livecd/boot/initramfs-linux.img
+        
+        # 14. Output the final structural file
+        cd build && genisoimage -rational-lock -joliet-long -trans-tbl -b boot/syslinux/isolinux.bin -c boot/syslinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o cherryOS-1.0-Algiers.iso livecd
 
     - name: Upload ISO Artifact
       uses: actions/upload-artifact@v4
       with:
         name: cherryOS-Arch-1.0-Algiers-iso
-        path: output/*.iso
+        path: build/cherryOS-1.0-Algiers.iso
+
