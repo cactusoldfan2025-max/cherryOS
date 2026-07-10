@@ -11,65 +11,70 @@ jobs:
     - name: Install System Architecture Compiler Utilities
       run: |
         sudo apt-get update
-        sudo apt-get install -y debootstrap debian-archive-keyring squashfs-tools genisoimage isolinux syslinux git wget
+        sudo apt-get install -y squashfs-tools genisoimage isolinux syslinux git wget systemd-container
 
-    - name: Bootstrap Modern Core Linux Filesystem
+    - name: Extract Official Pure Debian Core Filesystem
       run: |
         mkdir -p build/livecd/casper build/chroot
         
-        # Pull down pure, modern Debian Testing (Trixie) by forcing the testing target
-        sudo debootstrap --arch=amd64 testing build/chroot http://debian.org
+        # 1. Download official root file archive directly from the fast, stable Ubuntu/Debian image repositories
+        wget https://ubuntu.com -O /tmp/rootfs.tar.gz
         
-        # Inject up-to-date repository sources into the build
-        echo "deb http://debian.org testing main contrib non-free non-free-firmware" | sudo tee build/chroot/etc/apt/sources.list
+        # 2. Extract directly to workspace (No debootstrap network queries required)
+        sudo tar -xzf /tmp/rootfs.tar.gz -C build/chroot
+        
+        # 3. Mount critical virtual layers
+        sudo mount --bind /dev build/chroot/dev
+        sudo mount --bind /proc build/chroot/proc
+        sudo mount --bind /sys build/chroot/sys
+        sudo cp /etc/resolv.conf build/chroot/etc/resolv.conf
 
-    - name: Install Core Desktop System Packages Non-Interactively
+    - name: Install Core Desktop System Packages
       run: |
-        # Pull down lightweight XFCE, Plank application dock, and Calamares visual installer
+        # 4. Pull down the exact lightweight desktop layout parameters
         sudo chroot build/chroot apt-get update
-        sudo DEBIAN_FRONTEND=noninteractive chroot build/chroot apt-get install -y --no-install-recommends linux-image-amd64 live-boot xfce4 thunar mousepad xfce4-terminal plank lightdm lightdm-gtk-greeter sudo midori wget calamares systemd-sysv
-
+        sudo DEBIAN_FRONTEND=noninteractive chroot build/chroot apt-get install -y --no-install-recommends linux-image-generic live-boot xfce4 thunar mousepad xfce4-terminal plank lightdm lightdm-gtk-greeter sudo midori wget calamares systemd-sysv dbus
+        
     - name: Inject cherryOS Branding & Rebrand Architecture
       run: |
-        # Define local network hostname
+        # 5. Define local hostname identity
         echo "cherryos" | sudo tee build/chroot/etc/hostname
         
-        # Rebrand system profiles so information panels read cherryOS 1.0 Algiers
+        # 6. Rebrand OS properties
         sudo rm -f build/chroot/etc/os-release
-        echo -e 'NAME="cherryOS"\nVERSION="1.0 Algiers"\nID=cherryos\nID_LIKE=debian\nPRETTY_NAME="cherryOS 1.0 Algiers"\nVERSION_ID="1.0"' | sudo tee build/chroot/etc/os-release
+        echo -e 'NAME="cherryOS"\nVERSION="1.0 Algiers"\nID=cherryos\nID_LIKE=ubuntu\nPRETTY_NAME="cherryOS 1.0 Algiers"\nVERSION_ID="1.0"' | sudo tee build/chroot/etc/os-release
         echo "cherryOS 1.0 Algiers \n \l" | sudo tee build/chroot/etc/issue
 
     - name: Setup Safir fi internet & macOS Taskbar Layout
       run: |
-        # Download the classic glassy Safari icon logo configuration
+        # 7. Pull down safari logo configurations
         sudo mkdir -p build/chroot/usr/share/icons build/chroot/usr/share/applications build/chroot/etc/xdg/autostart
         sudo wget -O build/chroot/usr/share/icons/safari.png "https://wikimedia.org"
 
-        # Rebrand Midori binary configuration into 'Safir fi internet' properties
+        # 8. Rebrand custom web profile link
         echo -e "[Desktop Entry]\nVersion=1.0\nName=Safir fi internet\nComment=Travel the web on cherryOS\nExec=midori\nIcon=/usr/share/icons/safari.png\nTerminal=false\nType=Application\nCategories=Network;WebBrowser;" | sudo tee build/chroot/usr/share/applications/safir.desktop
 
-        # Force the Plank application lower launcher to launch automatically on boot
+        # 9. Auto-launch plank configuration on login screen initialization
         echo -e "[Desktop Entry]\nType=Application\nExec=plank\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\nName=Plank" | sudo tee build/chroot/etc/xdg/autostart/plank.desktop
         
         sudo mkdir -p build/chroot/etc/skel/.config/plank/dock1/launchers
         echo -e "[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/safir.desktop" | sudo tee build/chroot/etc/skel/.config/plank/dock1/launchers/safir.dockitem
 
-        # Create Graphical Calamares Hard Drive Installer Shortcut right on the Desktop
+        # 10. Frame local shortcut files on live workspace
         sudo mkdir -p build/chroot/etc/skel/Desktop
         echo -e "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Install cherryOS 1.0 Algiers\nComment=Install this system permanently\nExec=sudo calamares\nIcon=system-software-install\nTerminal=false\nCategories=System;" | sudo tee build/chroot/etc/skel/Desktop/install.desktop
         sudo chmod +x build/chroot/etc/skel/Desktop/install.desktop
 
-        # Force XFCE panel layout to pin to the top of the screen like a native Mac window
+        # 11. Force XFCE panel taskbar to top layout position (Mac Style)
         sudo mkdir -p build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
         echo -e '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfce4-panel" version="1.0">\n  <property name="panels" type="array">\n    <value type="int" value="1"/>\n  </property>\n  <property name="panel-1" type="empty">\n    <property name="position" type="string" value="p=0;x=0;y=0"/>\n    <property name="length" type="uint" value="100"/>\n    <property name="position-locked" type="bool" value="true"/>\n  </property>\n</channel>' | sudo tee build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 
     - name: Pre-configure cherryOS User Account
       run: |
-        # Set Up graphical user session targets and profile boundaries
+        # 12. Fix core account configuration boundaries
         sudo mkdir -p build/chroot/etc/lightdm
         echo -e "[UserList]\nMinimumUid=500\nHideUsers=nobody\n\n[Seat:*]\nuser-session=xfce\ngreeter-session=lightdm-gtk-greeter" | sudo tee build/chroot/etc/lightdm/lightdm.conf
         
-        # User: cherry / Password: algiers
         sudo chroot build/chroot useradd -m -s /bin/bash cherry
         echo "cherry:algiers" | sudo chroot build/chroot chpasswd
         sudo chroot build/chroot usermod -aG sudo cherry
@@ -77,10 +82,15 @@ jobs:
 
     - name: Pack Compress and Bake cherryOS ISO
       run: |
-        # Compress root structure into a high-speed squashfs container
+        # 13. Unmount tracking layers before packaging
+        sudo umount -l build/chroot/dev || true
+        sudo umount -l build/chroot/proc || true
+        sudo umount -l build/chroot/sys || true
+
+        # 14. Create compressed system layer container
         sudo mksquashfs build/chroot build/livecd/casper/filesystem.squashfs -comp xz
         
-        # Link bootloader files and assets cleanly
+        # 15. Setup live boot configuration architectures system-wide
         sudo cp /usr/lib/ISOLINUX/isolinux.bin build/livecd/
         sudo cp /usr/lib/syslinux/modules/bios/ldlinux.c32 build/livecd/
         
@@ -89,7 +99,7 @@ jobs:
         sudo cp build/chroot/boot/vmlinuz-* build/livecd/casper/vmlinuz
         sudo cp build/chroot/boot/initrd.img-* build/livecd/casper/initrd.img
         
-        # Run final compiler matrix to spit out a bootable disc image
+        # 16. Compile complete functional build architecture file
         cd build && genisoimage -rational-lock -joliet-long -trans-tbl -b isolinux.bin -c boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o cherryOS-1.0-Algiers.iso livecd
 
     - name: Upload ISO Artifact
