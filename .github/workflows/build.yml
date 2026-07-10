@@ -1,0 +1,104 @@
+name: Build cherryOS 1.0 Algiers
+on: [workflow_dispatch]
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y debootstrap squashfs-tools genisoimage isolinux syslinux git
+
+    - name: Bootstrap and Rebrand Core OS
+      run: |
+        mkdir -p build/livecd/casper build/chroot
+        
+        # 1. Bootstrap clean, modern Ubuntu Base
+        sudo debootstrap --arch=amd64 noble build/chroot http://ubuntu.com
+        sudo cp /etc/apt/sources.list build/chroot/etc/apt/sources.list
+        
+        # 2. Inject cherryOS Branded OS Identity
+        echo "cherryos" | sudo tee build/chroot/etc/hostname
+        sudo rm -f build/chroot/etc/os-release
+        echo -e 'NAME="cherryOS"\nVERSION="1.0 Algiers"\nID=cherryos\nID_LIKE=ubuntu\nPRETTY_NAME="cherryOS 1.0 Algiers"\nVERSION_ID="1.0"' | sudo tee build/chroot/etc/os-release
+        echo "cherryOS 1.0 Algiers \n \l" | sudo tee build/chroot/etc/issue
+
+    - name: Install Desktop and macOS Themes
+      run: |
+        # 3. Install lightweight XFCE interface, login manager, Midori browser, and plank dock
+        sudo chroot build/chroot apt-get update
+        sudo chroot build/chroot apt-get install -y --no-install-recommends linux-generic initramfs-tools xubuntu-desktop plank lightdm sudo midori wget
+        
+        # 4. Pull down high-quality macOS window themes and folder icons
+        sudo mkdir -p build/chroot/usr/share/themes build/chroot/usr/share/icons
+        sudo git clone https://github.com build/chroot/tmp/WhiteSur
+        sudo git clone https://github.com build/chroot/tmp/WhiteSurIcons
+        
+        # 5. Compile and install themes system-wide
+        cd build/chroot/tmp/WhiteSur && sudo ./install.sh -d build/chroot/usr/share/themes
+        cd ../WhiteSurIcons && sudo ./install.sh -d build/chroot/usr/share/icons
+        sudo rm -rf build/chroot/tmp/WhiteSur*
+
+    - name: Inject Custom Browser (Safir fi internet)
+      run: |
+        # 6. Grab a high-quality classic macOS Safari icon
+        sudo wget -O build/chroot/usr/share/icons/safari.png "https://wikimedia.org"
+
+        # 7. Create a custom rebranded app launcher for Midori
+        sudo mkdir -p build/chroot/usr/share/applications
+        echo -e "[Desktop Entry]\nVersion=1.0\nName=Safir fi internet\nComment=Travel the web on cherryOS\nExec=midori\nIcon=/usr/share/icons/safari.png\nTerminal=false\nType=Application\nCategories=Network;WebBrowser;" | sudo tee build/chroot/usr/share/applications/safir.desktop
+        
+        # Hide the default Midori shortcut so only "Safir fi internet" shows up
+        if [ -f build/chroot/usr/share/applications/midori.desktop ]; then
+          echo "NoDisplay=true" | sudo tee -a build/chroot/usr/share/applications/midori.desktop
+        fi
+
+    - name: Configure macOS Desktop Layout
+      run: |
+        # 8. Force the Plank bottom dock to launch automatically on boot
+        sudo mkdir -p build/chroot/etc/xdg/autostart
+        echo -e "[Desktop Entry]\nType=Application\nExec=plank\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\nName=Plank" | sudo tee build/chroot/etc/xdg/autostart/plank.desktop
+        
+        # Pin "Safir fi internet" directly onto the bottom Mac dock for user profiles
+        sudo mkdir -p build/chroot/etc/skel/.config/plank/dock1/launchers
+        echo -e "[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/safir.desktop" | sudo tee build/chroot/etc/skel/.config/plank/dock1/launchers/safir.dockitem
+
+        # 9. Configure XFCE panels to use a top menu bar layout (Mac style)
+        sudo mkdir -p build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
+        echo -e '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfce4-panel" version="1.0">\n  <property name="panels" type="array">\n    <value type="int" value="1"/>\n  </property>\n  <property name="panel-1" type="empty">\n    <property name="position" type="string" value="p=0;x=0;y=0"/>\n    <property name="length" type="uint" value="100"/>\n    <property name="position-locked" type="bool" value="true"/>\n  </property>\n</channel>' | sudo tee build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+
+        # 10. Set up graphical login screen defaults
+        echo -e "[UserList]\nMinimumUid=500\nHideUsers=nobody\n\n[Seat:*]\nuser-session=xubuntu\ngreeter-session=lightdm-gtk-greeter" | sudo tee build/chroot/etc/lightdm/lightdm.conf
+
+    - name: Pre-configure cherryOS User Account
+      run: |
+        # 11. Create a pre-made user profile
+        sudo chroot build/chroot useradd -m -s /bin/bash cherry
+        echo "cherry:algiers" | sudo chroot build/chroot chpasswd
+        sudo chroot build/chroot usermod -aG sudo cherry
+
+    - name: Pack and Bake ISO
+      run: |
+        # 12. Compress everything into a high-speed squashfs container
+        sudo mksquashfs build/chroot build/livecd/casper/filesystem.squashfs -comp xz
+        
+        # 13. Hook up the bootloader configs with your custom OS name
+        cp /usr/lib/ISOLINUX/isolinux.bin build/livecd/
+        cp /usr/lib/syslinux/modules/bios/ldlinux.c32 build/livecd/
+        echo -e "default cherryos\nlabel cherryos\n  menu label Start cherryOS 1.0 Algiers\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.img boot=casper quiet splash ---" > build/livecd/isolinux.cfg
+        
+        # 14. Copy live system kernels and output the final ISO
+        sudo cp build/chroot/boot/vmlinuz-* build/livecd/casper/vmlinuz
+        sudo cp build/chroot/boot/initrd.img-* build/livecd/casper/initrd.img
+        cd build && genisoimage -rational-lock -joliet-long -trans-tbl -b isolinux.bin -c boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o cherryOS-1.0-Algiers.iso livecd
+
+    - name: Upload ISO Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cherryOS-1.0-Algiers-iso
+        path: build/cherryOS-1.0-Algiers.iso
+
