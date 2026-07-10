@@ -8,10 +8,15 @@ jobs:
       image: archlinux:latest
       options: --privileged # Gives Arch full hardware access to compile the ISO
     steps:
-    - name: Initialize Arch Environment
+    - name: Initialize Arch Cryptographic Keys & Environment
       run: |
+        # Fix the missing signature keys error
+        pacman-key --init
+        pacman-key --populate archlinux
+        
+        # Run system upgrade and pull down correct packages
         pacman -Syu --noconfirm
-        pacman -S --noconfirm archiso git wget squashfs-tools libisobutton
+        pacman -S --noconfirm archiso git wget squashfs-tools libisoburn
 
     - name: Checkout code
       uses: actions/checkout@v4
@@ -22,7 +27,7 @@ jobs:
         mkdir -p build
         cp -r /usr/share/archiso/configs/releng/* build/
         
-        # 2. Add our customized software package list
+        # 2. Add our customized software package list (Lightweight XFCE, Plank, Midori, Calamares)
         echo -e "xfce4\nxfce4-goodies\nplank\nlightdm\nlightdm-gtk-greeter\nsudo\nmidori\nwget\ncalamares" >> build/packages.x86_64
 
     - name: Inject cherryOS Branding & Identity
@@ -82,4 +87,3 @@ jobs:
       with:
         name: cherryOS-Arch-1.0-Algiers-iso
         path: output/*.iso
-
