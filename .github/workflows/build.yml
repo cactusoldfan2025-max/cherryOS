@@ -17,7 +17,7 @@ jobs:
       run: |
         mkdir -p build/livecd/casper build/chroot
         
-        # 1. Bootstrap clean, modern Ubuntu Base
+        # 1. Bootstrap clean, modern Ubuntu Base using the correct official archive link
         sudo debootstrap --arch=amd64 noble build/chroot http://ubuntu.com
         sudo cp /etc/apt/sources.list build/chroot/etc/apt/sources.list
         
@@ -27,11 +27,11 @@ jobs:
         echo -e 'NAME="cherryOS"\nVERSION="1.0 Algiers"\nID=cherryos\nID_LIKE=ubuntu\nPRETTY_NAME="cherryOS 1.0 Algiers"\nVERSION_ID="1.0"' | sudo tee build/chroot/etc/os-release
         echo "cherryOS 1.0 Algiers \n \l" | sudo tee build/chroot/etc/issue
 
-    - name: Install Desktop and macOS Themes
+    - name: Install Desktop, GUI Installer, and Themes
       run: |
-        # 3. Install lightweight XFCE interface, login manager, Midori browser, and plank dock
+        # 3. Install XFCE interface, login manager, Midori browser, plank dock, and Calamares installer
         sudo chroot build/chroot apt-get update
-        sudo chroot build/chroot apt-get install -y --no-install-recommends linux-generic initramfs-tools xubuntu-desktop plank lightdm sudo midori wget
+        sudo chroot build/chroot apt-get install -y --no-install-recommends linux-generic initramfs-tools xubuntu-desktop plank lightdm sudo midori wget calamares calamares-settings-ubuntu
         
         # 4. Pull down high-quality macOS window themes and folder icons
         sudo mkdir -p build/chroot/usr/share/themes build/chroot/usr/share/icons
@@ -57,7 +57,7 @@ jobs:
           echo "NoDisplay=true" | sudo tee -a build/chroot/usr/share/applications/midori.desktop
         fi
 
-    - name: Configure macOS Desktop Layout
+    - name: Configure macOS Desktop Layout & Installer Shortcut
       run: |
         # 8. Force the Plank bottom dock to launch automatically on boot
         sudo mkdir -p build/chroot/etc/xdg/autostart
@@ -67,31 +67,36 @@ jobs:
         sudo mkdir -p build/chroot/etc/skel/.config/plank/dock1/launchers
         echo -e "[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/safir.desktop" | sudo tee build/chroot/etc/skel/.config/plank/dock1/launchers/safir.dockitem
 
-        # 9. Configure XFCE panels to use a top menu bar layout (Mac style)
+        # 9. Create a Desktop Shortcut for the Graphical Installer
+        sudo mkdir -p build/chroot/etc/skel/Desktop
+        echo -e "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Install cherryOS 1.0 Algiers\nComment=Install this system permanently to your hard drive\nExec=pkexec calamares\nIcon=system-software-install\nTerminal=false\nCategories=System;" | sudo tee build/chroot/etc/skel/Desktop/install.desktop
+        sudo chmod +x build/chroot/etc/skel/Desktop/install.desktop
+
+        # 10. Configure XFCE panels to use a top menu bar layout (Mac style)
         sudo mkdir -p build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
         echo -e '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfce4-panel" version="1.0">\n  <property name="panels" type="array">\n    <value type="int" value="1"/>\n  </property>\n  <property name="panel-1" type="empty">\n    <property name="position" type="string" value="p=0;x=0;y=0"/>\n    <property name="length" type="uint" value="100"/>\n    <property name="position-locked" type="bool" value="true"/>\n  </property>\n</channel>' | sudo tee build/chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 
-        # 10. Set up graphical login screen defaults
+        # 11. Set up graphical login screen defaults
         echo -e "[UserList]\nMinimumUid=500\nHideUsers=nobody\n\n[Seat:*]\nuser-session=xubuntu\ngreeter-session=lightdm-gtk-greeter" | sudo tee build/chroot/etc/lightdm/lightdm.conf
 
     - name: Pre-configure cherryOS User Account
       run: |
-        # 11. Create a pre-made user profile
+        # 12. Create a pre-made user profile
         sudo chroot build/chroot useradd -m -s /bin/bash cherry
         echo "cherry:algiers" | sudo chroot build/chroot chpasswd
         sudo chroot build/chroot usermod -aG sudo cherry
 
     - name: Pack and Bake ISO
       run: |
-        # 12. Compress everything into a high-speed squashfs container
+        # 13. Compress everything into a high-speed squashfs container
         sudo mksquashfs build/chroot build/livecd/casper/filesystem.squashfs -comp xz
         
-        # 13. Hook up the bootloader configs with your custom OS name
+        # 14. Hook up the bootloader configs with your custom OS name
         cp /usr/lib/ISOLINUX/isolinux.bin build/livecd/
         cp /usr/lib/syslinux/modules/bios/ldlinux.c32 build/livecd/
-        echo -e "default cherryos\nlabel cherryos\n  menu label Start cherryOS 1.0 Algiers\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.img boot=casper quiet splash ---" > build/livecd/isolinux.cfg
+        echo -e "default cherryos\nlabel cherryos\n  menu label Start cherryOS 1.0 Algiers (Live Mode)\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.img boot=casper quiet splash ---" > build/livecd/isolinux.cfg
         
-        # 14. Copy live system kernels and output the final ISO
+        # 15. Copy live system kernels and output the final ISO
         sudo cp build/chroot/boot/vmlinuz-* build/livecd/casper/vmlinuz
         sudo cp build/chroot/boot/initrd.img-* build/livecd/casper/initrd.img
         cd build && genisoimage -rational-lock -joliet-long -trans-tbl -b isolinux.bin -c boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o cherryOS-1.0-Algiers.iso livecd
